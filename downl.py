@@ -2,18 +2,12 @@ import requests
 import os
 import time
 from datetime import datetime
-import urllib3
-
-# Disable insecure request warnings
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# Set environment variable for requests to use an empty CA bundle
-os.environ["REQUESTS_CA_BUNDLE"] = ""
 
 # ========== CONFIGURATION ==========
 BASE_OUTPUT_FOLDER = r"C:\ctemp\PowerBI_Backups"
 POWER_BI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
 BASE_URL = "https://api.powerbi.com/v1.0/myorg"
+PBIACCESSTOKEN = ""
 
 # Module-level OUTPUT_FOLDER default so helper functions can reference it
 OUTPUT_FOLDER = BASE_OUTPUT_FOLDER
@@ -22,7 +16,6 @@ OUTPUT_FOLDER = BASE_OUTPUT_FOLDER
 WORKSPACE_IDS = [
     "c4cdb75f-3b13-41b4-96b0-7d5ab19d684b",
     "8bc62fc9-a7af-4b1d-9c89-3f764ceddbf8",
-    "856755d4-27a3-474d-b2e6-385b151d407d",
 ]
 
 # Set to True if you are a Power BI Admin and want to export from ALL workspaces
@@ -32,19 +25,14 @@ USE_ADMIN_API = False
 
 # ========== AUTHENTICATION ==========
 def get_access_token():
-    """Authenticate using interactive browser login"""
-    from azure.identity import InteractiveBrowserCredential
-    import ssl
 
-    print("🔐 Opening browser for authentication...")
+    token = PBIACCESSTOKEN.strip()
 
-    # Create SSL context that doesn't verify certificates
-    ssl_context = ssl._create_unverified_context()
+    if not token:
+        raise ValueError("❌ Bearer token cannot be empty!")
 
-    credential = InteractiveBrowserCredential()
-    token = credential.get_token(POWER_BI_SCOPE)
-    print("✅ Authentication successful!")
-    return token.token
+    print("✅ Token received!")
+    return token
 
 
 # ========== HELPER FUNCTIONS ==========
