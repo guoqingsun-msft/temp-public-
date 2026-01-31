@@ -15,12 +15,17 @@ OUTPUT_FOLDER = BASE_OUTPUT_FOLDER
 # Example: ["856755d4-27a3-474d-b2e6-385b151d407d", "c2e96de6-f2b6-417b-b5e5-21750327d6a5", "another-id"]
 WORKSPACE_IDS = [
     "c4cdb75f-3b13-41b4-96b0-7d5ab19d684b",
-    "8bc62fc9-a7af-4b1d-9c89-3f764ceddbf8",
 ]
 
 # Set to True if you are a Power BI Admin and want to export from ALL workspaces
 # This uses Admin APIs which require Fabric/Power BI Admin role
 USE_ADMIN_API = False
+
+# List of report names to download. If empty, downloads all reports.
+# Example: ["Sales Report", "Budget Analysis", "Financial Summary"]
+IncludeReportList = [  # If empty, downloads all reports.
+    "OData People",
+]
 
 
 # ========== AUTHENTICATION ==========
@@ -94,6 +99,46 @@ def get_reports_in_workspace(headers, workspace_id):
     return response.json().get("value", [])
 
 
+def _extract_error_details(response):
+    """Extract comprehensive error details from response object"""
+    error_parts = []
+
+    # Try JSON response first
+    try:
+        json_error = response.json()
+        if isinstance(json_error, dict):
+            if "error" in json_error:
+                error_parts.append(f"Error: {json_error['error']}")
+            if "error_description" in json_error:
+                error_parts.append(f"Description: {json_error['error_description']}")
+            if "message" in json_error:
+                error_parts.append(f"Message: {json_error['message']}")
+            if error_parts:
+                return " | ".join(error_parts)
+    except (ValueError, KeyError):
+        pass
+
+    # Check response text
+    if response.text:
+        error_parts.append(f"Body: {response.text}")
+
+    # Check for diagnostic headers
+    if "x-powerbi-error-details" in response.headers:
+        error_parts.append(
+            f"PowerBI Error: {response.headers['x-powerbi-error-details']}"
+        )
+    if "x-ms-diagnostics" in response.headers:
+        error_parts.append(f"Diagnostics: {response.headers['x-ms-diagnostics']}")
+    if "x-activity-id" in response.headers:
+        error_parts.append(f"Activity ID: {response.headers['x-activity-id']}")
+
+    # Fall back to reason phrase
+    if not error_parts:
+        error_parts.append(f"Reason: {response.reason}")
+
+    return " | ".join(error_parts)
+
+
 def export_report(headers, workspace_id, report_id, report_name, workspace_name):
     """
     Export a report as .pbix file
@@ -139,18 +184,16 @@ def export_report(headers, workspace_id, report_id, report_name, workspace_name)
                 return file_path, total_size, None
 
             elif response.status_code == 404:
-                error_detail = (
-                    response.text[:300] if response.text else "Report not found"
-                )
+                error_detail = _extract_error_details(response)
                 last_error = f"404 Not Found: {error_detail}"
             elif response.status_code == 403:
-                error_detail = response.text[:300] if response.text else "Access denied"
+                error_detail = _extract_error_details(response)
                 last_error = f"403 Forbidden: {error_detail}"
             elif response.status_code == 429:
                 last_error = "Rate limited - too many requests"
             else:
-                error_msg = response.text[:300] if response.text else "Unknown error"
-                last_error = f"HTTP {response.status_code}: {error_msg}"
+                error_detail = _extract_error_details(response)
+                last_error = f"HTTP {response.status_code}: {error_detail}"
 
         except requests.exceptions.Timeout:
             last_error = "Request timed out - file may be too large"
@@ -219,6 +262,20 @@ def bulk_export_all_reports():
                 report_name = report["name"]
                 report_type = report.get("reportType", "PowerBIReport")
 
+                # Filter by IncludeReportList if specified
+                if IncludeReportList and report_name not in IncludeReportList:
+                    print(
+                        f"      ⏭️  [{j}/{len(reports)}] Skipping (Not in filter list): {report_name}"
+                    )
+                    results["skipped"].append(
+                        {
+                            "workspace": workspace_name,
+                            "report": report_name,
+                            "reason": "Not in IncludeReportList",
+                        }
+                    )
+                    continue
+
                 # Skip paginated reports (RDL) - cannot export as .pbix
                 if report_type == "PaginatedReport":
                     print(
@@ -234,7 +291,7 @@ def bulk_export_all_reports():
                     continue
 
                 print(
-                    f"      📥 [{j}/{len(reports)}] Exporting: {report_name}...",
+                    f"      📥 [{j}/{len(reports)}] Exporting: {report_name}",
                     end=" ",
                     flush=True,
                 )
